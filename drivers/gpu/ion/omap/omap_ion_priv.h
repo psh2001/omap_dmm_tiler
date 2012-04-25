@@ -24,5 +24,6 @@ int omap_tiler_alloc(struct ion_heap *heap,
 		     struct omap_ion_tiler_alloc_data *data);
 struct ion_heap *omap_tiler_heap_create(struct ion_platform_heap *heap_data);
 void omap_tiler_heap_destroy(struct ion_heap *heap);
-
+s32 tiler_fill_virt_array(u32 phys, u32 *virt_array,
+                u32 *array_size);
 #endif /* _LINUX_OMAP_ION_PRIV_H */

@@ -24,11 +24,14 @@
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
-#include <mach/tiler.h>
+//#include <mach/tiler.h>
+#include "../../../drivers/staging/omapdrm/omap_dmm_tiler.h"
 #include <asm/mach/map.h>
 #include <asm/page.h>
 
 #include "../ion_priv.h"
+
+typedef struct tiler_block *tiler_handle_t;
 
 static int omap_tiler_heap_allocate(struct ion_heap *heap,
 				    struct ion_buffer *buffer,
@@ -45,7 +48,7 @@ static int omap_tiler_heap_allocate(struct ion_heap *heap,
 }
 
 struct omap_tiler_info {
-	tiler_blk_handle tiler_handle;	/* handle of the allocation intiler */
+	tiler_handle_t tiler_handle;	        /* handle of the allocation intiler */
 	bool lump;			/* true for a single lump allocation */
 	u32 n_phys_pages;		/* number of physical pages */
 	u32 *phys_addrs;		/* array addrs of pages */
@@ -54,7 +57,93 @@ struct omap_tiler_info {
 	u32 tiler_start;		/* start addr in tiler -- if not page
 					   aligned this may not equal the
 					   first entry onf tiler_addrs */
+	u32 phys;
 };
+#if 0
+static const struct {
+        uint32_t x_shft;        /* unused X-bits (as part of bpp) */
+        uint32_t y_shft;        /* unused Y-bits (as part of bpp) */
+        uint32_t cpp;           /* bytes/chars per pixel */
+        uint32_t slot_w;        /* width of each slot (in pixels) */
+        uint32_t slot_h;        /* height of each slot (in pixels) */
+} geom[TILFMT_NFORMATS] = {
+                [TILFMT_8BIT]  = GEOM(0, 0, 1),
+                [TILFMT_16BIT] = GEOM(0, 1, 2),
+                [TILFMT_32BIT] = GEOM(1, 1, 4),
+                [TILFMT_PAGE]  = GEOM(SLOT_WIDTH_BITS, SLOT_HEIGHT_BITS, 1),
+};
+#endif
+
+#define TILER_FMT(x)    ((enum tiler_fmt) \
+                ((x >> SHIFT_ACC_MODE) & MASK_ACC_MODE))
+
+enum tiler_fmt tiler_fmt(u32 phys)
+{
+        return TILER_FMT(phys);
+}
+
+static u32 tiler_block_vstride( u32 phy)
+{
+	struct omap_ion_tiler_alloc_data *data;	
+	printk("+++++++++value of params: w=%d h=%d fmt=%d\n", data->w, data->h, data->fmt);
+        return PAGE_ALIGN((phy & ~PAGE_MASK) + geom[data->fmt].cpp * data->w);
+}
+
+u32 tiler_pstride(u32 phys)
+{
+        enum tiler_fmt fmt = tiler_fmt(phys);
+    //    BUG_ON(fmt == TILFMT_INVALID);
+
+        /* return the virtual stride for page mode */
+        if (fmt == TILFMT_PAGE)
+                return tiler_block_vstride(phys);
+
+        return tiler_stride(phys & ~MASK_VIEW);
+}
+
+s32 tiler_fill_virt_array(u32 phys, u32 *virt_array,
+                u32 *array_size)
+{
+        u32 v, p, len, size, num_pages = 0;
+        u32 i = 0, offs = 0;
+        struct omap_ion_tiler_alloc_data *data;
+
+        if (!array_size)
+                return -1;
+
+        /* get page aligned stride */
+        v = tiler_block_vstride(phys);
+        p = tiler_pstride(phys);
+
+        /* get page aligned virtual size for the block */
+        size = PAGE_ALIGN(tiler_size(data->fmt, data->w, data->h));
+
+        if (*array_size < (size/PAGE_SIZE) || !virt_array) {
+                *array_size = (size/PAGE_SIZE);
+                return -2;
+        }
+
+        offs = (phys & PAGE_MASK);
+        while (size) {
+                /* set len to length of one row (2D), or full length if 1D */
+                len = v;
+
+                while (len && size) {
+                        virt_array[i++] = offs;
+                        num_pages++;
+                        size -= PAGE_SIZE;
+                        len -= PAGE_SIZE;
+                        offs += PAGE_SIZE;
+                }
+
+                /* set offset to next row beginning */
+                offs += p - v;
+        }
+
+        *array_size = num_pages;
+
+        return 0;
+}
 
 int omap_tiler_alloc(struct ion_heap *heap,
 		     struct ion_client *client,
@@ -63,17 +152,21 @@ int omap_tiler_alloc(struct ion_heap *heap,
 	struct ion_handle *handle;
 	struct ion_buffer *buffer;
 	struct omap_tiler_info *info;
+	tiler_handle_t tiler_handle;
 	u32 n_phys_pages;
 	u32 n_tiler_pages;
 	ion_phys_addr_t addr;
 	int i, ret;
+	size_t size;
+	//u16 aln;
+	struct page **pages;
 
 	if (data->fmt == TILER_PIXEL_FMT_PAGE && data->h != 1) {
 		pr_err("%s: Page mode (1D) allocations must have a height "
 		       "of one\n", __func__);
 		return -EINVAL;
 	}
-
+#if 0
 	ret = tiler_memsize(data->fmt, data->w, data->h,
 			    &n_phys_pages,
 			    &n_tiler_pages);
@@ -85,23 +178,33 @@ int omap_tiler_alloc(struct ion_heap *heap,
 	}
 
 	BUG_ON(!n_phys_pages || !n_tiler_pages);
+#endif /* ics obsolete */
+	printk("+++++++++value of params: w=%d h=%d fmt=%d\n", data->w, data->h, data->fmt);
+	tiler_handle = tiler_reserve_2d(data->fmt, data->w, data->h, 4096);
+	printk("+++++++++++tiler_handle allocated=%x\n", tiler_handle);
+
+	if (IS_ERR_OR_NULL(tiler_handle)) {
+		ret = PTR_ERR(tiler_handle);
+		pr_err("%s: failure to allocate address space from tiler\n",
+			__func__);
+		goto err_nomem;
+	}
+	size = tiler_vsize(data->fmt, data->w, data->h);
+	n_tiler_pages = size / PAGE_SIZE;
 
 	info = kzalloc(sizeof(struct omap_tiler_info) +
 		       sizeof(u32) * n_phys_pages +
 		       sizeof(u32) * n_tiler_pages, GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
-
+	info->tiler_handle = tiler_handle;
 	info->n_phys_pages = n_phys_pages;
 	info->n_tiler_pages = n_tiler_pages;
 	info->phys_addrs = (u32 *)(info + 1);
 	info->tiler_addrs = info->phys_addrs + n_phys_pages;
 
-	info->tiler_handle = tiler_alloc_block_area(data->fmt, data->w, data->h,
-						    &info->tiler_start,
-						    info->tiler_addrs);
 	if (IS_ERR_OR_NULL(info->tiler_handle)) {
-		ret = PTR_ERR(info->tiler_handle);
+		ret = PTR_ERR(tiler_handle);
 		pr_err("%s: failure to allocate address space from tiler\n",
 		       __func__);
 		goto err_nomem;
@@ -126,14 +229,21 @@ int omap_tiler_alloc(struct ion_heap *heap,
 			info->phys_addrs[i] = addr + i*PAGE_SIZE;
 	}
 
-	ret = tiler_pin_block(info->tiler_handle, info->phys_addrs,
-			      info->n_phys_pages);
+	ret = tiler_pin(tiler_handle, pages, info->n_phys_pages, 0, true);
+			      
 	if (ret) {
 		pr_err("%s: failure to pin pages to tiler\n", __func__);
 		goto err_alloc;
 	}
+#if 0
+static inline u32 tiler_vstride(const struct tiler_block_t *b)
+{
+        return PAGE_ALIGN((b->phys & ~PAGE_MASK) + tiler_bpp(b) * b->width);
+}
+#endif
 
-	data->stride = tiler_block_vstride(info->tiler_handle);
+	info->phys = tiler_ssptr(tiler_handle);
+	data->stride = tiler_block_vstride(info->phys);
 
 	/* create an ion handle  for the allocation */
 	handle = ion_alloc(client, 0, 0, 1 << OMAP_ION_HEAP_TILER);
@@ -145,15 +255,21 @@ int omap_tiler_alloc(struct ion_heap *heap,
 	}
 
 	buffer = ion_handle_buffer(handle);
-	buffer->size = info->n_tiler_pages * PAGE_SIZE;
+	buffer->size = size * PAGE_SIZE;
 	buffer->priv_virt = info;
 	data->handle = handle;
+
+	if (tiler_fill_virt_array(info->phys, info->tiler_addrs,
+                        &n_tiler_pages) < 0) {
+                pr_err("%s: failure filling tiler's virtual array %d\n",
+                                __func__, n_tiler_pages);
+        }
 	return 0;
 
 err:
-	tiler_unpin_block(info->tiler_handle);
+	tiler_unpin(tiler_handle);
 err_alloc:
-	tiler_free_block_area(info->tiler_handle);
+	tiler_release(tiler_handle);
 	if (info->lump)
 		ion_carveout_free(heap, addr, n_phys_pages * PAGE_SIZE);
 	else
@@ -164,12 +280,58 @@ err_nomem:
 	return ret;
 }
 
+#if 0
+s32 tiler_fill_virt_array(u32 phys, u32 *virt_array,
+                u32 *array_size)
+{
+        u32 v, p, len, size, num_pages = 0;
+        u32 i = 0, offs = 0;
+	struct omap_ion_tiler_alloc_data *data;
+
+        if (!array_size)
+                return -1;
+
+        /* get page aligned stride */
+        v = tiler_block_vstride(phys);
+        p = tiler_pstride(phys);
+
+        /* get page aligned virtual size for the block */
+        size = PAGE_ALIGN(tiler_size(data->fmt, data->w, data->h));
+
+        if (*array_size < (size/PAGE_SIZE) || !virt_array) {
+                *array_size = (size/PAGE_SIZE);
+                return -2;
+        }
+
+        offs = (phys & PAGE_MASK);
+        while (size) {
+                /* set len to length of one row (2D), or full length if 1D */
+                len = v;
+
+                while (len && size) {
+                        virt_array[i++] = offs;
+                        num_pages++;
+                        size -= PAGE_SIZE;
+                        len -= PAGE_SIZE;
+                        offs += PAGE_SIZE;
+                }
+
+                /* set offset to next row beginning */
+                offs += p - v;
+        }
+
+        *array_size = num_pages;
+
+        return 0;
+}
+#endif
+
 void omap_tiler_heap_free(struct ion_buffer *buffer)
 {
 	struct omap_tiler_info *info = buffer->priv_virt;
 
-	tiler_unpin_block(info->tiler_handle);
-	tiler_free_block_area(info->tiler_handle);
+	tiler_unpin(info->tiler_handle);
+	tiler_release(info->tiler_handle);
 
 	if (info->lump) {
 		ion_carveout_free(buffer->heap, info->phys_addrs[0],

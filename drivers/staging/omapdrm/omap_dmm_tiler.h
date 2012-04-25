@@ -61,6 +61,8 @@ struct tiler_block {
 #define SHIFT_ACC_MODE		27
 #define MASK_ACC_MODE		3
 
+#define MASK_VIEW               (MASK_X_INVERT | MASK_Y_INVERT | MASK_XY_FLIP)
+
 #define MASK(bits) ((1 << (bits)) - 1)
 
 #define TILVIEW_8BIT    0x60000000u
@@ -73,6 +75,35 @@ struct tiler_block {
 #define TIL_ADDR(x, orient, a)\
 	((u32) (x) | (orient) | ((a) << SHIFT_ACC_MODE))
 
+<<<<<<< HEAD
+=======
+/* Geometry table */
+#define GEOM(xshift, yshift, bytes_per_pixel) { \
+                .x_shft = (xshift), \
+                .y_shft = (yshift), \
+                .cpp    = (bytes_per_pixel), \
+                .slot_w = 1 << (SLOT_WIDTH_BITS - (xshift)), \
+                .slot_h = 1 << (SLOT_HEIGHT_BITS - (yshift)), \
+        }
+
+static const struct {
+        uint32_t x_shft;        /* unused X-bits (as part of bpp) */
+        uint32_t y_shft;        /* unused Y-bits (as part of bpp) */
+        uint32_t cpp;           /* bytes/chars per pixel */
+        uint32_t slot_w;        /* width of each slot (in pixels) */
+        uint32_t slot_h;        /* height of each slot (in pixels) */
+} geom[TILFMT_NFORMATS] = {
+                [TILFMT_8BIT]  = GEOM(0, 0, 1),
+                [TILFMT_16BIT] = GEOM(0, 1, 2),
+                [TILFMT_32BIT] = GEOM(1, 1, 4),
+                [TILFMT_PAGE]  = GEOM(SLOT_WIDTH_BITS, SLOT_HEIGHT_BITS, 1),
+};
+
+/* externally accessible functions */
+int omap_dmm_init(struct drm_device *dev);
+int omap_dmm_remove(void);
+
+>>>>>>> omap-dmm-tiler: changes for upstream tiler
 #ifdef CONFIG_DEBUG_FS
 int tiler_map_show(struct seq_file *s, void *arg);
 #endif

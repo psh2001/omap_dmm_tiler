@@ -9,7 +9,7 @@ config DRM_OMAP
 	select FB_SYS_COPYAREA
 	select FB_SYS_IMAGEBLIT
 	select FB_SYS_FOPS
-	default n
+	default y
 	help
 	  DRM display driver for OMAP2/3/4 based boards.
 

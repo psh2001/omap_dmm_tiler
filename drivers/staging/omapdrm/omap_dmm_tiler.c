@@ -40,6 +40,7 @@
 static struct tcm *containers[TILFMT_NFORMATS];
 static struct dmm *omap_dmm;
 
+#if 0
 /* Geometry table */
 #define GEOM(xshift, yshift, bytes_per_pixel) { \
 		.x_shft = (xshift), \
@@ -62,6 +63,7 @@ static const struct {
 		[TILFMT_PAGE]  = GEOM(SLOT_WIDTH_BITS, SLOT_HEIGHT_BITS, 1),
 };
 
+#endif
 
 /* lookup table for registers w/ per-engine instances */
 static const uint32_t reg[][4] = {
@@ -315,11 +317,13 @@ int tiler_pin(struct tiler_block *block, struct page **pages,
 
 	return ret;
 }
+EXPORT_SYMBOL(tiler_pin);
 
 int tiler_unpin(struct tiler_block *block)
 {
 	return fill(&block->area, NULL, 0, 0, false);
 }
+EXPORT_SYMBOL(tiler_unpin);
 
 /*
  * Reserve/release
@@ -334,6 +338,7 @@ struct tiler_block *tiler_reserve_2d(enum tiler_fmt fmt, uint16_t w,
 	BUG_ON(!validfmt(fmt));
 
 	/* convert width/height to slots */
+	printk("tiler_reserve_2d: width->slots=%d height->slots=%d\n", geom[fmt].slot_w, geom[fmt].slot_h);
 	w = DIV_ROUND_UP(w, geom[fmt].slot_w);
 	h = DIV_ROUND_UP(h, geom[fmt].slot_h);
 
@@ -343,9 +348,11 @@ struct tiler_block *tiler_reserve_2d(enum tiler_fmt fmt, uint16_t w,
 	align /= geom[fmt].slot_w * geom[fmt].cpp;
 
 	block->fmt = fmt;
+	printk("tiler_reserve_2d:block->fmt=%d align=%x w=%d h=%d\n",block->fmt, align, w, h);
 
 	ret = tcm_reserve_2d(containers[fmt], w, h, align, &block->area);
 	if (ret) {
+		printk("tiler_reserve_2d: Return value of tcm_reserve_2d is non zero hence freeing block\n");
 		kfree(block);
 		return 0;
 	}
@@ -357,6 +364,7 @@ struct tiler_block *tiler_reserve_2d(enum tiler_fmt fmt, uint16_t w,
 
 	return block;
 }
+EXPORT_SYMBOL(tiler_reserve_2d);
 
 struct tiler_block *tiler_reserve_1d(size_t size)
 {

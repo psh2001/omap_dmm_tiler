@@ -25,7 +25,7 @@
 #include <linux/regulator/fixed.h>
 #include <linux/leds.h>
 #include <linux/leds_pwm.h>
-
+#include <linux/memblock.h>
 #include <mach/hardware.h>
 #include <asm/hardware/gic.h>
 #include <asm/mach-types.h>
@@ -41,7 +41,7 @@
 #include <video/omap-panel-nokia-dsi.h>
 #include <video/omap-panel-picodlp.h>
 #include <linux/wl12xx.h>
-
+#include "omap4_ion.h"
 #include "mux.h"
 #include "hsmmc.h"
 #include "control.h"
@@ -924,12 +924,32 @@ static void __init omap_4430sdp_init(void)
 		pr_err("Keypad initialization failed: %d\n", status);
 
 	omap_4430sdp_display_init();
+#ifdef CONFIG_ION_OMAP
+	omap4_register_ion();
+#endif
+}
+
+static void __init omap_4430sdp_reserve(void)
+{
+        /* do the static reservations first */
+        memblock_remove(PHYS_ADDR_SMC_MEM, PHYS_ADDR_SMC_SIZE);
+        memblock_remove(PHYS_ADDR_DUCATI_MEM, PHYS_ADDR_DUCATI_SIZE);
+        /* ipu needs to recognize secure input buffer area as well */
+ //       omap_ipu_set_static_mempool(PHYS_ADDR_DUCATI_MEM,
+   //             PHYS_ADDR_DUCATI_SIZE + OMAP4_ION_HEAP_SECURE_INPUT_SIZE);
+//#ifdef CONFIG_OMAP_REMOTE_PROC_DSP
+//        memblock_remove(PHYS_ADDR_TESLA_MEM, PHYS_ADDR_TESLA_SIZE);
+//        omap_dsp_set_static_mempool(PHYS_ADDR_TESLA_MEM,
+//                                        PHYS_ADDR_TESLA_SIZE);
+//#endif
+
+        omap_reserve();
 }
 
 MACHINE_START(OMAP_4430SDP, "OMAP4430 4430SDP board")
 	/* Maintainer: Santosh Shilimkar - Texas Instruments Inc */
 	.atag_offset	= 0x100,
-	.reserve	= omap_reserve,
+	.reserve	= omap_4430sdp_reserve,
 	.map_io		= omap4_map_io,
 	.init_early	= omap4430_init_early,
 	.init_irq	= gic_init_irq,

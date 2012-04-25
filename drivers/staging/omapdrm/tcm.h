@@ -135,7 +135,8 @@ static inline s32 tcm_reserve_2d(struct tcm *tcm, u16 width, u16 height,
 		 /* align must be a 2 power */
 		 (align & (align - 1))) ? -EINVAL :
 		(height > tcm->height || width > tcm->width) ? -ENOMEM : 0;
-
+		
+		printk("tcm_resrve_2d:value of res=%d\n",res);		
 	if (!res) {
 		area->is2d = true;
 		res = tcm->reserve_2d(tcm, height, width, align, area);
