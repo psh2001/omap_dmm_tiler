@@ -98,6 +98,11 @@ static struct drm_info_list omap_dmm_debugfs_list[] = {
 	{"tiler_map", tiler_map_show, 0},
 };
 
+/* list of debugfs files that are specific to devices with dmm/tiler */
+static struct drm_info_list omap_dmm_debugfs_list[] = {
+{"tiler_map", tiler_map_show, 0},
+};
+
 int omap_debugfs_init(struct drm_minor *minor)
 {
 	struct drm_device *dev = minor->dev;
