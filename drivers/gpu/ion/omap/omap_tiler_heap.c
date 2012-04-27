@@ -96,7 +96,7 @@ u32 tiler_pstride(u32 phys, struct omap_ion_tiler_alloc_data *data)
         if (fmt == TILFMT_PAGE)
                 return tiler_block_vstride(phys, data);
 
-		return tiler_stride(phys & ~MASK_VIEW);
+		return tiler_stride(data->fmt);
 }
 
 s32 tiler_fill_virt_array(u32 phys, u32 *virt_array,
@@ -230,10 +230,10 @@ int omap_tiler_alloc(struct ion_heap *heap,
 		}
 	} else {
 		info->lump = true;
-		for (i = 0; i < n_phys_pages; i++)
+		for (i = 0; i < n_phys_pages; i++) {
 			info->phys_addrs[i] = addr + i*PAGE_SIZE;
 			printk("eslse part:++++++++value-of-i=%d +++info->phys_addrs[%d]=%x addr=%x\n", i, info->phys_addrs[i], addr);
-		
+		}
 	}		
 	
 	ret = tiler_pin(tiler_handle, info->phys_addrs, info->n_phys_pages, 0, true);
