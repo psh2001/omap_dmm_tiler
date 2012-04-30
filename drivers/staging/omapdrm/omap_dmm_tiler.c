@@ -78,6 +78,7 @@ static void *alloc_dma(struct dmm_txn *txn, size_t sz, dma_addr_t *pa)
 {
 	void *ptr;
 	struct refill_engine *engine = txn->engine_handle;
+	printk("++++++++inside alloc_dma++++++++++++++++\n");
 
 	/* dmm programming requires 16 byte aligned addresses */
 	txn->current_pa = round_up(txn->current_pa, 16);
@@ -174,7 +175,7 @@ static struct dmm_txn *dmm_txn_init(struct dmm *dmm, struct tcm *tcm)
  * corresponding slot is cleared (ie. dummy_pa is programmed)
  */
 static int dmm_txn_append(struct dmm_txn *txn, struct pat_area *area,
-		struct page **pages, uint32_t npages, uint32_t roll)
+		struct mem_tiler_type *memptr, uint32_t npages, uint32_t roll)
 {
 	dma_addr_t pat_pa = 0;
 	uint32_t *data;
@@ -183,6 +184,7 @@ static int dmm_txn_append(struct dmm_txn *txn, struct pat_area *area,
 	int columns = (1 + area->x1 - area->x0);
 	int rows = (1 + area->y1 - area->y0);
 	int i = columns*rows;
+
 	u32 *lut = omap_dmm->lut + (engine->tcm->lut_id * omap_dmm->lut_width *
 			omap_dmm->lut_height) +
 			(area->y0 * omap_dmm->lut_width) + area->x0;
@@ -204,8 +206,11 @@ static int dmm_txn_append(struct dmm_txn *txn, struct pat_area *area,
 		int n = i + roll;
 		if (n >= npages)
 			n -= npages;
-		data[i] = (pages && pages[n]) ?
-			page_to_phys(pages[n]) : engine->dmm->dummy_pa;
+		if (memptr->addr_type == PAGE_TYPE)
+		data[i] = (memptr->pages && memptr->pages[n]) ?
+			page_to_phys(memptr->pages[n]) : engine->dmm->dummy_pa;
+		else
+		data[i] = memptr->phys_array[n];
 	}
 
 	/* fill in lut with new addresses */
@@ -269,13 +274,14 @@ cleanup:
 /*
  * DMM programming
  */
-static int fill(struct tcm_area *area, struct page **pages,
+static int fill(struct tcm_area *area, struct  mem_tiler_type *memptr,
 		uint32_t npages, uint32_t roll, bool wait)
 {
 	int ret = 0;
 	struct tcm_area slice, area_s;
 	struct dmm_txn *txn;
 
+	printk("+++++++++=inside fill function+++++++++++\n");
 	txn = dmm_txn_init(omap_dmm, area->tcm);
 	if (IS_ERR_OR_NULL(txn))
 		return PTR_ERR(txn);
@@ -286,7 +292,7 @@ static int fill(struct tcm_area *area, struct page **pages,
 				.x1 = slice.p1.x,  .y1 = slice.p1.y,
 		};
 
-		ret = dmm_txn_append(txn, &p_area, pages, npages, roll);
+		ret = dmm_txn_append(txn, &p_area, memptr, npages, roll);
 		if (ret)
 			goto fail;
 
@@ -305,12 +311,12 @@ fail:
 
 /* note: slots for which pages[i] == NULL are filled w/ dummy page
  */
-int tiler_pin(struct tiler_block *block, struct page **pages,
+int tiler_pin(struct tiler_block *block, struct mem_tiler_type *memptr,
 		uint32_t npages, uint32_t roll, bool wait)
 {
 	int ret;
-
-	ret = fill(&block->area, pages, npages, roll, wait);
+	printk("+++++++++++++++++inside tiler_pin+++++++++++++=\n");
+	ret = fill(&block->area, memptr, npages, roll, wait);
 
 	if (ret)
 		tiler_unpin(block);
@@ -321,7 +327,13 @@ EXPORT_SYMBOL(tiler_pin);
 
 int tiler_unpin(struct tiler_block *block)
 {
-	return fill(&block->area, NULL, 0, 0, false);
+	struct mem_tiler_type *memptr;
+	memptr = kzalloc(sizeof(struct mem_tiler_type), GFP_KERNEL);
+	if (!memptr)
+		return -ENOMEM;
+
+	memptr->pages = NULL;
+	return fill(&block->area, memptr, 0, 0, false);
 }
 EXPORT_SYMBOL(tiler_unpin);
 
@@ -528,10 +540,17 @@ static int omap_dmm_probe(struct platform_device *dev)
 	struct tcm_area area = {0};
 	u32 hwinfo, pat_geom, lut_table_size;
 	struct resource *mem;
+	struct mem_tiler_type *memptr;
 
 	omap_dmm = kzalloc(sizeof(*omap_dmm), GFP_KERNEL);
 	if (!omap_dmm) {
 		dev_err(&dev->dev, "failed to allocate driver data section\n");
+		goto fail;
+	}
+
+	memptr = kzalloc(sizeof(struct mem_tiler_type), GFP_KERNEL);
+	if (!memptr) {
+		ret = -ENOMEM;
 		goto fail;
 	}
 
@@ -696,7 +715,8 @@ static int omap_dmm_probe(struct platform_device *dev)
 	/* initialize all LUTs to dummy page entries */
 	for (i = 0; i < omap_dmm->num_lut; i++) {
 		area.tcm = omap_dmm->tcm[i];
-		if (fill(&area, NULL, 0, 0, true))
+		memptr->pages = NULL;
+		if (fill(&area, memptr, 0, 0, true))
 			dev_err(omap_dmm->dev, "refill failed");
 	}
 

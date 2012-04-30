@@ -41,6 +41,19 @@ struct tiler_block {
 	enum tiler_fmt fmt;		/* format */
 };
 
+enum mem_tiler_addr_type {
+        PAGE_TYPE = 0,
+        ARRAY_TYPE
+};
+
+struct mem_tiler_type {
+	union {
+		struct page **pages;
+        	u32 *phys_array;
+	};
+	enum mem_tiler_addr_type addr_type;
+};
+
 /* bits representing the same slot in DMM-TILER hw-block */
 #define SLOT_WIDTH_BITS         6
 #define SLOT_HEIGHT_BITS        6
@@ -109,7 +122,7 @@ int tiler_map_show(struct seq_file *s, void *arg);
 #endif
 
 /* pin/unpin */
-int tiler_pin(struct tiler_block *block, struct page **pages,
+int tiler_pin(struct tiler_block *block, struct mem_tiler_type *memptr,
 		uint32_t npages, uint32_t roll, bool wait);
 int tiler_unpin(struct tiler_block *block);
 

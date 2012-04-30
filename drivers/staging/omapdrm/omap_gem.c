@@ -336,6 +336,7 @@ static int fault_2d(struct drm_gem_object *obj,
 	struct omap_gem_object *omap_obj = to_omap_bo(obj);
 	struct usergart_entry *entry;
 	enum tiler_fmt fmt = gem2fmt(omap_obj->flags);
+	struct mem_tiler_type *memptr;
 	struct page *pages[64];  /* XXX is this too much to have on stack? */
 	unsigned long pfn;
 	pgoff_t pgoff, base_pgoff;
@@ -386,10 +387,16 @@ static int fault_2d(struct drm_gem_object *obj,
 			sizeof(struct page *) * slots);
 	memset(pages + slots, 0,
 			sizeof(struct page *) * (usergart[fmt].height - slots));
+	memptr = kzalloc(sizeof(struct mem_tiler_type), GFP_KERNEL);
+	if (!memptr)
+		return -ENOMEM;
 
-	ret = tiler_pin(entry->block, pages, ARRAY_SIZE(pages), 0, true);
+	memptr->pages =  pages;
+	memptr->addr_type = PAGE_TYPE;
+	ret = tiler_pin(entry->block, memptr, ARRAY_SIZE(pages), 0, true);
 	if (ret) {
 		dev_err(obj->dev->dev, "failed to pin: %d\n", ret);
+		kfree(memptr);
 		return ret;
 	}
 
@@ -579,12 +586,17 @@ int omap_gem_roll(struct drm_gem_object *obj, uint32_t roll)
 {
 	struct omap_gem_object *omap_obj = to_omap_bo(obj);
 	uint32_t npages = obj->size >> PAGE_SHIFT;
+	struct mem_tiler_type *memptr;
 	int ret = 0;
 
 	if (roll > npages) {
 		dev_err(obj->dev->dev, "invalid roll: %d\n", roll);
 		return -EINVAL;
 	}
+	
+	memptr = kzalloc(sizeof(struct mem_tiler_type), GFP_KERNEL);
+	if (!memptr)
+		return -ENOMEM;
 
 	omap_obj->roll = roll;
 
@@ -596,12 +608,15 @@ int omap_gem_roll(struct drm_gem_object *obj, uint32_t roll)
 		ret = get_pages(obj, &pages);
 		if (ret)
 			goto fail;
-		ret = tiler_pin(omap_obj->block, pages, npages, roll, true);
+		memptr->pages = pages;
+		memptr->addr_type = PAGE_TYPE;
+		ret = tiler_pin(omap_obj->block, memptr, npages, roll, true);
 		if (ret)
 			dev_err(obj->dev->dev, "could not repin: %d\n", ret);
 	}
 
 fail:
+	kfree(memptr);
 	mutex_unlock(&obj->dev->struct_mutex);
 
 	return ret;
@@ -616,6 +631,7 @@ int omap_gem_get_paddr(struct drm_gem_object *obj,
 {
 	struct omap_drm_private *priv = obj->dev->dev_private;
 	struct omap_gem_object *omap_obj = to_omap_bo(obj);
+	struct mem_tiler_type *memptr;
 	int ret = 0;
 
 	mutex_lock(&obj->dev->struct_mutex);
@@ -649,7 +665,12 @@ int omap_gem_get_paddr(struct drm_gem_object *obj,
 			}
 
 			/* TODO: enable async refill.. */
-			ret = tiler_pin(block, pages, npages,
+			memptr = kzalloc(sizeof(struct mem_tiler_type), GFP_KERNEL);
+			if (!memptr)
+				return -ENOMEM;
+			memptr->pages = pages;
+			memptr->addr_type = PAGE_TYPE;
+			ret = tiler_pin(block, memptr, npages,
 					omap_obj->roll, true);
 			if (ret) {
 				tiler_release(block);
